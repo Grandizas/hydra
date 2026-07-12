@@ -1,0 +1,130 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', -apple-system, 'SF Pro Display', sans-serif;
+  background: linear-gradient(180deg, #f8fcff 0%, #eef6fc 50%, #e9f3fb 100%);
+  min-height: 100vh;
+  color: #10293a;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: #1e8fdd;
+  text-decoration: none;
+}
+a:hover {
+  color: #0f76c0;
+}
+
+button {
+  font-family: inherit;
+}
+input {
+  font-family: inherit;
+}
+
+/* Shared frosted-glass panel used by most dashboard cards */
+.hydra-card {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 26px;
+  box-shadow: 0 14px 36px rgba(30, 110, 170, 0.07);
+  padding: 28px;
+}
+
+.card-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.card-footnote {
+  margin: 18px 0 0 0;
+  font-size: 12px;
+  color: #93a9bb;
+  line-height: 1.5;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes spinRev {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+@keyframes rise {
+  0% {
+    transform: translateY(0) translateX(0);
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.75;
+  }
+  60% {
+    transform: translateY(-130px) translateX(4px);
+  }
+  100% {
+    transform: translateY(-230px) translateX(-3px);
+    opacity: 0;
+  }
+}
+@keyframes rippleOut {
+  0% {
+    transform: scale(0.35);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(2.1);
+    opacity: 0;
+  }
+}
+@keyframes dropFall {
+  0% {
+    transform: translateY(-60px) scale(0.6);
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(150px) scale(1.05);
+    opacity: 0;
+  }
+}
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes floaty {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-7px);
+  }
+}
+@keyframes glowPulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
