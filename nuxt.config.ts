@@ -17,6 +17,8 @@ export default defineNuxtConfig({
         { name: 'viewport', content: 'width=device-width, initial-scale=1' }
       ],
       link: [
+        // The file is a PNG; the ?v= query busts the browser's sticky favicon cache.
+        { rel: 'icon', type: 'image/png', href: '/favicon.ico?v=2' },
         { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
         { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
         {
