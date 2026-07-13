@@ -48,6 +48,13 @@ function fmtTime(t: number) {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+// Minutes since midnight → "HH:MM" (1440 → "24:00").
+export function fmtHM(min: number) {
+  const h = Math.floor(min / 60)
+  const m = min % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
 export function useHydra() {
   const entries = useState<Entry[]>('hydra-entries', () => [])
   const displayMl = useState<number>('hydra-displayMl', () => 0)
@@ -58,6 +65,12 @@ export function useHydra() {
   const remindersOn = useState<boolean>('hydra-remindersOn', () => true)
   const reminderChoice = useState<string>('hydra-reminderChoice', () => 'Every 45 minutes')
   const goal = useState<number>('hydra-goal', () => 2500)
+
+  // Custom-schedule settings (used when reminderChoice === 'Custom schedule').
+  // Window bounds are stored as minutes since midnight (e.g. 9:30 = 570).
+  const customInterval = useState<number>('hydra-customInterval', () => 60) // minutes
+  const customStart = useState<number>('hydra-customStart', () => 7 * 60) // 07:00
+  const customEnd = useState<number>('hydra-customEnd', () => 21 * 60) // 21:00
 
   // --- Derived core values ---
   const total = computed(() => entries.value.reduce((s, e) => s + e.ml, 0))
@@ -76,7 +89,10 @@ export function useHydra() {
           date: todayKey(),
           entries: entries.value,
           remindersOn: remindersOn.value,
-          reminderChoice: reminderChoice.value
+          reminderChoice: reminderChoice.value,
+          customInterval: customInterval.value,
+          customStart: customStart.value,
+          customEnd: customEnd.value
         })
       )
     } catch {
@@ -93,6 +109,13 @@ export function useHydra() {
         const data = JSON.parse(raw)
         remindersOn.value = data.remindersOn !== false
         reminderChoice.value = data.reminderChoice || 'Every 45 minutes'
+        if (typeof data.customInterval === 'number') customInterval.value = data.customInterval
+        if (typeof data.customStart === 'number' && typeof data.customEnd === 'number') {
+          // Migrate legacy whole-hour bounds (both ≤ 24) to minutes since midnight.
+          const legacy = data.customStart <= 24 && data.customEnd <= 24
+          customStart.value = legacy ? data.customStart * 60 : data.customStart
+          customEnd.value = legacy ? data.customEnd * 60 : data.customEnd
+        }
         if (data.date === todayKey() && Array.isArray(data.entries)) {
           entries.value = data.entries
         }
@@ -164,6 +187,22 @@ export function useHydra() {
     persist()
   }
 
+  const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n))
+
+  // Window bounds are minutes since midnight (0–1440).
+  function setCustomSchedule(patch: { interval?: number; start?: number; end?: number }) {
+    if (patch.interval != null && Number.isFinite(patch.interval))
+      customInterval.value = clamp(Math.round(patch.interval), 5, 240)
+    if (patch.start != null && Number.isFinite(patch.start))
+      customStart.value = clamp(Math.round(patch.start), 0, 1439)
+    if (patch.end != null && Number.isFinite(patch.end))
+      customEnd.value = clamp(Math.round(patch.end), 1, 1440)
+    // Keep the window valid: end must be at least 15 min after start.
+    if (customEnd.value <= customStart.value)
+      customEnd.value = Math.min(1440, customStart.value + 15)
+    persist()
+  }
+
   // --- Presentation values ---
   const todayLabel = computed(() =>
     new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
@@ -220,12 +259,16 @@ export function useHydra() {
       .reverse()
   )
 
+  const customSummary = computed(
+    () => `Every ${customInterval.value}m · ${fmtHM(customStart.value)}–${fmtHM(customEnd.value)}`
+  )
+
   const reminderOptions = computed(() =>
     REMINDER_DEFS.map((o) => {
       const sel = reminderChoice.value === o.label
       return {
         label: o.label,
-        sub: o.sub,
+        sub: o.label === 'Custom schedule' ? customSummary.value : o.sub,
         selected: sel,
         border: sel ? 'rgba(30,143,221,0.55)' : 'rgba(200,224,242,0.6)',
         bg: sel
@@ -329,6 +372,9 @@ export function useHydra() {
     remindersOn,
     reminderChoice,
     goal,
+    customInterval,
+    customStart,
+    customEnd,
     // core derived
     total,
     count,
@@ -342,6 +388,7 @@ export function useHydra() {
     submitCustom,
     toggleReminders,
     pickReminder,
+    setCustomSchedule,
     // presentation
     todayLabel,
     pctLabel,
