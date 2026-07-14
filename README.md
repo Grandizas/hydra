@@ -1,5 +1,8 @@
 # Hydra 💧
 
+<img width="1859" height="1006" alt="image" src="https://github.com/user-attachments/assets/1fd8e731-2bce-428a-98d8-6b9a27532d5c" />
+
+
 A calm, single-page hydration dashboard. Log your water, watch a glass fill in real time, and get gentle reminders on a rhythm that fits your day — all stored locally in your browser, no account required.
 
 Built with **Nuxt 4** + **Vue 3** and deployed on **Vercel**.
