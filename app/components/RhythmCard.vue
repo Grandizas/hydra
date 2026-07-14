@@ -236,6 +236,7 @@ function onCupInput(e: Event) {
 .track {
   display: flex;
   gap: 10px;
+  padding-top: 10px;
   margin-top: 16px;
   padding-bottom: 6px;
   overflow-x: auto;
