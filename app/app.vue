@@ -7,6 +7,7 @@ onMounted(() => init())
 <template>
   <div class="dashboard">
     <AppHeader />
+    <MissedCupBanner />
     <HeroProgress />
     <RhythmCard />
 
