@@ -72,6 +72,11 @@ export function useHydra() {
   const customStart = useState<number>('hydra-customStart', () => 7 * 60) // 07:00
   const customEnd = useState<number>('hydra-customEnd', () => 21 * 60) // 21:00
 
+  // How the drinking rhythm is planned: 'time' spreads the goal over the
+  // schedule slots; 'cup' fits a fixed cup size across the window.
+  const rhythmMode = useState<'time' | 'cup'>('hydra-rhythmMode', () => 'time')
+  const cupSize = useState<number>('hydra-cupSize', () => 250) // ml
+
   // --- Derived core values ---
   const total = computed(() => entries.value.reduce((s, e) => s + e.ml, 0))
   const count = computed(() => entries.value.length)
@@ -93,7 +98,9 @@ export function useHydra() {
           reminderChoice: reminderChoice.value,
           customInterval: customInterval.value,
           customStart: customStart.value,
-          customEnd: customEnd.value
+          customEnd: customEnd.value,
+          rhythmMode: rhythmMode.value,
+          cupSize: cupSize.value
         })
       )
     } catch {
@@ -118,6 +125,8 @@ export function useHydra() {
           customStart.value = legacy ? data.customStart * 60 : data.customStart
           customEnd.value = legacy ? data.customEnd * 60 : data.customEnd
         }
+        if (data.rhythmMode === 'time' || data.rhythmMode === 'cup') rhythmMode.value = data.rhythmMode
+        if (typeof data.cupSize === 'number') cupSize.value = data.cupSize
         if (data.date === todayKey() && Array.isArray(data.entries)) {
           entries.value = data.entries
         }
@@ -198,6 +207,20 @@ export function useHydra() {
   function setGoal(ml: number) {
     if (!Number.isFinite(ml)) return
     goal.value = clamp(Math.round(ml / GOAL_STEP) * GOAL_STEP, GOAL_MIN, GOAL_MAX)
+    persist()
+  }
+
+  // Rhythm planning preferences.
+  const CUP_MIN = 50
+  const CUP_MAX = 1000
+  const CUP_STEP = 10
+  function setRhythmMode(mode: 'time' | 'cup') {
+    rhythmMode.value = mode
+    persist()
+  }
+  function setCupSize(ml: number) {
+    if (!Number.isFinite(ml)) return
+    cupSize.value = clamp(Math.round(ml / CUP_STEP) * CUP_STEP, CUP_MIN, CUP_MAX)
     persist()
   }
 
@@ -405,6 +428,13 @@ export function useHydra() {
     goalMin: GOAL_MIN,
     goalMax: GOAL_MAX,
     goalStep: GOAL_STEP,
+    rhythmMode,
+    cupSize,
+    setRhythmMode,
+    setCupSize,
+    cupMin: CUP_MIN,
+    cupMax: CUP_MAX,
+    cupStep: CUP_STEP,
     // presentation
     todayLabel,
     pctLabel,

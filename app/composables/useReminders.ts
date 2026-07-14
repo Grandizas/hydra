@@ -53,7 +53,9 @@ export function useReminders() {
     goal,
     customInterval,
     customStart,
-    customEnd
+    customEnd,
+    rhythmMode,
+    cupSize
   } = useHydra()
 
   const permission = useState<NotifyState>('hydra-notify-perm', () => 'default')
@@ -71,17 +73,45 @@ export function useReminders() {
     return SCHEDULES[reminderChoice.value] ?? SCHEDULES['Every 45 minutes']
   })
 
-  // A recommended cup-by-cup plan: the schedule's clock slots, each carrying an
-  // even share of the daily goal. Same slots the reminders fire on.
+  // A recommended cup-by-cup plan. The reminders fire on exactly these slots.
+  //  - 'time': the schedule's clock slots, each an even share of the goal.
+  //  - 'cup' : a fixed cup size, fitted evenly across the window.
   const rhythm = computed(() => {
     const s = schedule.value
-    const interval = Math.max(5, s.intervalMin)
-    const mins: number[] = []
-    for (let m = s.startMin; m < s.endMin; m += interval) mins.push(m)
-    const count = mins.length
-    const perCup = count ? Math.round(goal.value / count / 10) * 10 : 0
-    const cups = mins.map((m) => ({ min: m, time: toHM(m), ml: perCup }))
-    return { cups, count, perCup, interval, startMin: s.startMin, endMin: s.endMin }
+    const windowMin = Math.max(0, s.endMin - s.startMin)
+
+    let cups: { min: number; time: string; ml: number }[]
+    let stepMin: number
+
+    if (rhythmMode.value === 'cup') {
+      const cup = Math.max(10, cupSize.value)
+      const count = Math.max(1, Math.ceil(goal.value / cup))
+      stepMin = windowMin ? Math.round(windowMin / count) : 0
+      cups = Array.from({ length: count }, (_, i) => {
+        const min = Math.round(s.startMin + (windowMin * i) / count)
+        // Last cup carries the remainder so the day sums to the goal exactly.
+        const ml = i < count - 1 ? cup : goal.value - cup * (count - 1)
+        return { min, time: toHM(min), ml: Math.max(0, ml) }
+      })
+    } else {
+      const interval = Math.max(5, s.intervalMin)
+      const mins: number[] = []
+      for (let m = s.startMin; m < s.endMin; m += interval) mins.push(m)
+      const perCup = mins.length ? Math.round(goal.value / mins.length / 10) * 10 : 0
+      stepMin = interval
+      cups = mins.map((m) => ({ min: m, time: toHM(m), ml: perCup }))
+    }
+
+    return {
+      mode: rhythmMode.value,
+      cups,
+      count: cups.length,
+      cupSize: cupSize.value,
+      perCup: cups.length ? cups[0].ml : 0,
+      stepMin,
+      startMin: s.startMin,
+      endMin: s.endMin
+    }
   })
 
   function syncPermission() {
@@ -115,25 +145,27 @@ export function useReminders() {
     return msg
   }
 
-  function fireReminder() {
+  function fireReminder(cupMl?: number) {
     const remaining = Math.max(0, goal.value - total.value)
     const tail =
       remaining > 0
-        ? `${remaining.toLocaleString()} ml to go today.`
+        ? cupMl
+          ? `About ${cupMl.toLocaleString()} ml this time · ${remaining.toLocaleString()} ml to go.`
+          : `${remaining.toLocaleString()} ml to go today.`
         : 'You have reached your goal — lovely.'
     show('Time to hydrate 💧', `${nextMessage()}\n${tail}`, 'hydra-reminder')
     lastReminderAt = Date.now()
     persistLast()
   }
 
-  // Timestamp of the current reminder "slot" — clock-aligned to the schedule,
-  // e.g. "Every 90m from 09:30" → 09:30, 11:00, 12:30, … today.
-  function currentSlotTs(now: Date, s: Schedule) {
-    const nowMin = now.getHours() * 60 + now.getMinutes()
-    const interval = Math.max(5, s.intervalMin)
-    const slotMin = s.startMin + Math.floor((nowMin - s.startMin) / interval) * interval
-    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-    return midnight + slotMin * 60_000
+  // The most recent rhythm cup at/just before `nowMin`, or null if before the first.
+  function currentCup(nowMin: number) {
+    let cup: { min: number; ml: number } | null = null
+    for (const c of rhythm.value.cups) {
+      if (c.min <= nowMin) cup = c
+      else break
+    }
+    return cup
   }
 
   // Decides — on each tick — whether a reminder is due.
@@ -145,10 +177,13 @@ export function useReminders() {
     const nowMin = now.getHours() * 60 + now.getMinutes()
     if (nowMin < s.startMin || nowMin >= s.endMin) return
 
-    // Fire once per clock slot, and skip a slot if you already drank during it.
-    const slotTs = currentSlotTs(now, s)
+    // Fire once per rhythm slot, and skip a slot if you already drank during it.
+    const cup = currentCup(nowMin)
+    if (!cup) return
+    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+    const slotTs = midnight + cup.min * 60_000
     const lastEntry = entries.value.length ? entries.value[entries.value.length - 1].t : 0
-    if (lastReminderAt < slotTs && lastEntry < slotTs) fireReminder()
+    if (lastReminderAt < slotTs && lastEntry < slotTs) fireReminder(cup.ml)
   }
 
   function startScheduler() {
