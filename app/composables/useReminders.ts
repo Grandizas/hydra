@@ -39,6 +39,10 @@ function supportedNow() {
   return import.meta.client && typeof window !== 'undefined' && 'Notification' in window
 }
 
+// Minutes since midnight → "HH:MM".
+const toHM = (min: number) =>
+  `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
+
 export function useReminders() {
   const {
     remindersOn,
@@ -65,6 +69,19 @@ export function useReminders() {
       }
     }
     return SCHEDULES[reminderChoice.value] ?? SCHEDULES['Every 45 minutes']
+  })
+
+  // A recommended cup-by-cup plan: the schedule's clock slots, each carrying an
+  // even share of the daily goal. Same slots the reminders fire on.
+  const rhythm = computed(() => {
+    const s = schedule.value
+    const interval = Math.max(5, s.intervalMin)
+    const mins: number[] = []
+    for (let m = s.startMin; m < s.endMin; m += interval) mins.push(m)
+    const count = mins.length
+    const perCup = count ? Math.round(goal.value / count / 10) * 10 : 0
+    const cups = mins.map((m) => ({ min: m, time: toHM(m), ml: perCup }))
+    return { cups, count, perCup, interval, startMin: s.startMin, endMin: s.endMin }
   })
 
   function syncPermission() {
@@ -109,6 +126,16 @@ export function useReminders() {
     persistLast()
   }
 
+  // Timestamp of the current reminder "slot" — clock-aligned to the schedule,
+  // e.g. "Every 90m from 09:30" → 09:30, 11:00, 12:30, … today.
+  function currentSlotTs(now: Date, s: Schedule) {
+    const nowMin = now.getHours() * 60 + now.getMinutes()
+    const interval = Math.max(5, s.intervalMin)
+    const slotMin = s.startMin + Math.floor((nowMin - s.startMin) / interval) * interval
+    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+    return midnight + slotMin * 60_000
+  }
+
   // Decides — on each tick — whether a reminder is due.
   function maybeNotify() {
     if (!active.value || goalReached.value) return
@@ -118,20 +145,15 @@ export function useReminders() {
     const nowMin = now.getHours() * 60 + now.getMinutes()
     if (nowMin < s.startMin || nowMin >= s.endMin) return
 
-    // Reminders are relative to your last drink, so logging water resets the
-    // timer. Falls back to when reminders were (re)started.
+    // Fire once per clock slot, and skip a slot if you already drank during it.
+    const slotTs = currentSlotTs(now, s)
     const lastEntry = entries.value.length ? entries.value[entries.value.length - 1].t : 0
-    const reference = Math.max(lastEntry, lastReminderAt)
-    if (Date.now() - reference >= s.intervalMin * 60_000) fireReminder()
+    if (lastReminderAt < slotTs && lastEntry < slotTs) fireReminder()
   }
 
   function startScheduler() {
     if (tickTimer) return
-    // Don't fire the instant reminders switch on — wait a full interval first.
-    if (!lastReminderAt) {
-      lastReminderAt = Date.now()
-      persistLast()
-    }
+    maybeNotify() // check the current slot right away rather than after a tick
     tickTimer = setInterval(maybeNotify, CHECK_EVERY_MS)
   }
 
@@ -193,6 +215,7 @@ export function useReminders() {
     supported,
     active,
     schedule,
+    rhythm,
     requestNotifications,
     sendTestReminder
   }

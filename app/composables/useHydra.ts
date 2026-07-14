@@ -88,6 +88,7 @@ export function useHydra() {
         JSON.stringify({
           date: todayKey(),
           entries: entries.value,
+          goal: goal.value,
           remindersOn: remindersOn.value,
           reminderChoice: reminderChoice.value,
           customInterval: customInterval.value,
@@ -107,6 +108,7 @@ export function useHydra() {
       const raw = localStorage.getItem(STORAGE_KEY)
       if (raw) {
         const data = JSON.parse(raw)
+        if (typeof data.goal === 'number') goal.value = data.goal
         remindersOn.value = data.remindersOn !== false
         reminderChoice.value = data.reminderChoice || 'Every 45 minutes'
         if (typeof data.customInterval === 'number') customInterval.value = data.customInterval
@@ -188,6 +190,16 @@ export function useHydra() {
   }
 
   const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n))
+
+  // Daily target, clamped to a sane range and snapped to 50 ml steps.
+  const GOAL_MIN = 1000
+  const GOAL_MAX = 5000
+  const GOAL_STEP = 50
+  function setGoal(ml: number) {
+    if (!Number.isFinite(ml)) return
+    goal.value = clamp(Math.round(ml / GOAL_STEP) * GOAL_STEP, GOAL_MIN, GOAL_MAX)
+    persist()
+  }
 
   // Window bounds are minutes since midnight (0–1440).
   function setCustomSchedule(patch: { interval?: number; start?: number; end?: number }) {
@@ -389,6 +401,10 @@ export function useHydra() {
     toggleReminders,
     pickReminder,
     setCustomSchedule,
+    setGoal,
+    goalMin: GOAL_MIN,
+    goalMax: GOAL_MAX,
+    goalStep: GOAL_STEP,
     // presentation
     todayLabel,
     pctLabel,

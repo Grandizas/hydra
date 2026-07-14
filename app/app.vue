@@ -8,6 +8,7 @@ onMounted(() => init())
   <div class="dashboard">
     <AppHeader />
     <HeroProgress />
+    <RhythmCard />
 
     <div class="row">
       <FeelCard />
