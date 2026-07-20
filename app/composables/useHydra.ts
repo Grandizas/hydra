@@ -11,8 +11,17 @@ export interface QuickAdd {
 }
 
 const STORAGE_KEY = 'hydra:v1'
+const HISTORY_KEY = 'hydra:history'
+const HISTORY_MAX_DAYS = 400 // ~13 months, bounds localStorage size
 const QUICK_ADD_AMOUNTS = [100, 250, 500, 750]
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+export interface DayRecord {
+  date: string // dateKeyOf(...) — "YYYY-M-D"
+  total: number
+  goal: number
+  reached: boolean
+}
 
 const REMINDER_DEFS = [
   { label: 'Every 45 minutes', sub: 'Steady rhythm' },
@@ -38,9 +47,12 @@ let rafId: number | null = null
 let pourTimer: ReturnType<typeof setTimeout> | null = null
 let didInit = false
 
-function todayKey() {
-  const d = new Date()
+function dateKeyOf(d: Date) {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`
+}
+
+function todayKey() {
+  return dateKeyOf(new Date())
 }
 
 function fmtTime(t: number) {
@@ -77,6 +89,10 @@ export function useHydra() {
   const rhythmMode = useState<'time' | 'cup'>('hydra-rhythmMode', () => 'time')
   const cupSize = useState<number>('hydra-cupSize', () => 250) // ml
 
+  // Per-day history — survives the daily reset (separate key), powering the
+  // weekly chart, streaks, and achievements.
+  const history = useState<DayRecord[]>('hydra-history', () => [])
+
   // --- Derived core values ---
   const total = computed(() => entries.value.reduce((s, e) => s + e.ml, 0))
   const count = computed(() => entries.value.length)
@@ -106,11 +122,42 @@ export function useHydra() {
     } catch {
       /* ignore quota / privacy-mode errors */
     }
+    syncHistory()
+  }
+
+  // Upsert today's record into history and persist it. Called whenever the
+  // day's total/goal changes, so history always reflects the latest.
+  function syncHistory() {
+    if (!import.meta.client) return
+    const key = todayKey()
+    const record: DayRecord = {
+      date: key,
+      total: total.value,
+      goal: goal.value,
+      reached: total.value >= goal.value
+    }
+    const rest = history.value.filter((r) => r.date !== key)
+    // Keep chronological-ish order and cap the length.
+    history.value = [...rest, record].slice(-HISTORY_MAX_DAYS)
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(history.value))
+    } catch {
+      /* ignore */
+    }
   }
 
   function init() {
     if (!import.meta.client || didInit) return
     didInit = true
+    try {
+      const rawHistory = localStorage.getItem(HISTORY_KEY)
+      if (rawHistory) {
+        const parsed = JSON.parse(rawHistory)
+        if (Array.isArray(parsed)) history.value = parsed
+      }
+    } catch {
+      /* ignore corrupt history */
+    }
     try {
       const raw = localStorage.getItem(STORAGE_KEY)
       if (raw) {
@@ -135,6 +182,8 @@ export function useHydra() {
       /* corrupt payload — start fresh */
     }
     displayMl.value = total.value
+    // Record today (creates a fresh 0-record on a new day; refreshes it otherwise).
+    syncHistory()
   }
 
   // --- Animated counter ---
@@ -222,6 +271,51 @@ export function useHydra() {
     if (!Number.isFinite(ml)) return
     cupSize.value = clamp(Math.round(ml / CUP_STEP) * CUP_STEP, CUP_MIN, CUP_MAX)
     persist()
+  }
+
+  // --- Backup / restore -------------------------------------------------
+  const BACKUP_VERSION = 1
+
+  function exportData(): string {
+    let state: unknown = null
+    let hist: DayRecord[] = []
+    if (import.meta.client) {
+      try {
+        const s = localStorage.getItem(STORAGE_KEY)
+        if (s) state = JSON.parse(s)
+        const h = localStorage.getItem(HISTORY_KEY)
+        if (h) hist = JSON.parse(h)
+      } catch {
+        /* ignore */
+      }
+    }
+    return JSON.stringify(
+      { app: 'hydra', version: BACKUP_VERSION, exportedAt: new Date().toISOString(), state, history: hist },
+      null,
+      2
+    )
+  }
+
+  function importData(json: string): { ok: boolean; error?: string; days?: number } {
+    if (!import.meta.client) return { ok: false, error: 'Unavailable.' }
+    let data: { app?: string; history?: unknown; state?: unknown }
+    try {
+      data = JSON.parse(json)
+    } catch {
+      return { ok: false, error: 'Could not read this file.' }
+    }
+    if (!data || data.app !== 'hydra' || !Array.isArray(data.history)) {
+      return { ok: false, error: 'This does not look like a Hydra backup.' }
+    }
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(data.history))
+      if (data.state && typeof data.state === 'object') {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data.state))
+      }
+    } catch {
+      return { ok: false, error: 'Could not save the backup (storage full?).' }
+    }
+    return { ok: true, days: data.history.length }
   }
 
   // Window bounds are minutes since midnight (0–1440).
@@ -315,15 +409,62 @@ export function useHydra() {
     })
   )
 
+  // Aggregate stats across history, with today's live values overriding its record.
+  const dailyStats = computed(() => {
+    const map = new Map(history.value.map((r) => [r.date, r]))
+    const key = todayKey()
+    map.set(key, { date: key, total: total.value, goal: goal.value, reached: goalReached.value })
+    const records = [...map.values()]
+    const goalDays = records.filter((r) => r.reached).length
+    const activeDays = records.length
+
+    // Current streak: consecutive goal-reached days ending today (or yesterday
+    // if today isn't done yet, so the streak isn't shown as broken mid-day).
+    const reachedDates = new Set(records.filter((r) => r.reached).map((r) => r.date))
+    let streak = 0
+    const d = new Date()
+    if (!reachedDates.has(dateKeyOf(d))) d.setDate(d.getDate() - 1)
+    while (reachedDates.has(dateKeyOf(d))) {
+      streak++
+      d.setDate(d.getDate() - 1)
+    }
+    return { goalDays, activeDays, streak }
+  })
+
   const weekBars = computed(() => {
-    const todayIdx = (new Date().getDay() + 6) % 7
+    const now = new Date()
+    const todayIdx = (now.getDay() + 6) % 7 // Mon = 0
+    const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - todayIdx)
+    const map = new Map(history.value.map((r) => [r.date, r]))
+
     return DAY_NAMES.map((day, i) => {
+      const d = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i)
       const isToday = i === todayIdx
+      const isFuture = i > todayIdx
+
+      let dayTotal = 0
+      let dayGoal = goal.value
+      if (isToday) {
+        dayTotal = total.value
+      } else {
+        const r = map.get(dateKeyOf(d))
+        if (r) {
+          dayTotal = r.total
+          dayGoal = r.goal || goal.value
+        }
+      }
+      const dpct = dayGoal ? Math.min(100, Math.round((dayTotal / dayGoal) * 100)) : 0
+      const has = dayTotal > 0
+
       return {
         day,
-        h: isToday ? `${Math.max(8, pct.value)}%` : '8%',
-        fill: isToday ? 'linear-gradient(180deg, #4cc3f7, #1e8fdd)' : 'rgba(210,228,242,0.8)',
-        labelColor: isToday ? '#1e7fc4' : '#93a9bb'
+        h: has ? `${Math.max(8, dpct)}%` : isFuture ? '6%' : '8%',
+        fill: isToday
+          ? 'linear-gradient(180deg, #4cc3f7, #1e8fdd)'
+          : has
+            ? 'linear-gradient(180deg, #9fd8f5, #5fb3e6)'
+            : 'rgba(210,228,242,0.8)',
+        labelColor: isToday ? '#1e7fc4' : has ? '#5a7d96' : '#93a9bb'
       }
     })
   })
@@ -344,6 +485,13 @@ export function useHydra() {
 
   const insights = computed(() => {
     const list: { icon: string; text: string }[] = []
+    // History-based: a multi-day streak is the strongest motivator.
+    if (dailyStats.value.streak >= 2) {
+      list.push({
+        icon: '✦',
+        text: `You've reached your goal ${dailyStats.value.streak} days in a row — keep the streak flowing.`
+      })
+    }
     if (count.value > 0) {
       const beforeNoon = entries.value
         .filter((e) => new Date(e.t).getHours() < 12)
@@ -377,9 +525,9 @@ export function useHydra() {
       { name: 'First Drop', desc: 'Log your first glass', unlocked: count.value >= 1 },
       { name: '1L Club', desc: 'Drink 1 liter in a day', unlocked: total.value >= 1000 },
       { name: 'Ocean Mode', desc: 'Reach your daily goal', unlocked: rawPct.value >= 100 },
-      { name: '7-Day Streak', desc: 'Seven days in a row', unlocked: false },
-      { name: 'Hydration Hero', desc: '30 goal days total', unlocked: false },
-      { name: '365 Days', desc: 'A full year of Hydra', unlocked: false }
+      { name: '7-Day Streak', desc: 'Seven days in a row', unlocked: dailyStats.value.streak >= 7 },
+      { name: 'Hydration Hero', desc: '30 goal days total', unlocked: dailyStats.value.goalDays >= 30 },
+      { name: '365 Days', desc: 'A full year of Hydra', unlocked: dailyStats.value.activeDays >= 365 }
     ]
     return defs.map((a) => ({
       name: a.name,
@@ -424,6 +572,8 @@ export function useHydra() {
     toggleReminders,
     pickReminder,
     setCustomSchedule,
+    exportData,
+    importData,
     setGoal,
     goalMin: GOAL_MIN,
     goalMax: GOAL_MAX,

@@ -22,6 +22,8 @@ onMounted(() => init())
       <InsightsCard />
       <AchievementsCard />
     </div>
+
+    <DataBackup />
   </div>
 </template>
 
